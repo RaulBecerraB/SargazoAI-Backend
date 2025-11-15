@@ -13,7 +13,6 @@ public class CoordinateService : ICoordinateService
 {
     private readonly ILogger<CoordinateService> _logger;
     private readonly HttpClient _httpClient;
-    private const string PythonServiceUrl = "http://127.0.0.1:8000/predict";
 
     public CoordinateService(ILogger<CoordinateService> logger, HttpClient httpClient)
     {
@@ -121,7 +120,7 @@ public class CoordinateService : ICoordinateService
             var json = JsonSerializer.Serialize(request);
             var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
 
-            var response = await _httpClient.PostAsync(PythonServiceUrl, content);
+            var response = await _httpClient.PostAsync(PythonApiConfig.Endpoints.Predict, content);
 
             if (!response.IsSuccessStatusCode)
             {
