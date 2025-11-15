@@ -21,25 +21,6 @@ public class CoordinateController : ControllerBase
     }
 
     /// <summary>
-    /// Obtiene un arreglo de coordenadas
-    /// </summary>
-    [HttpGet]
-    public async Task<ActionResult<IEnumerable<CoordinateDTO>>> GetCoordinates()
-    {
-        try
-        {
-            _logger.LogInformation("Solicitud GET para obtener coordenadas");
-            var coordinates = await _coordinateService.GetCoordinatesAsync();
-            return Ok(coordinates);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error al obtener coordenadas");
-            return StatusCode(StatusCodes.Status500InternalServerError, "Error al procesar la solicitud");
-        }
-    }
-
-    /// <summary>
     /// Predice coordenadas futuras usando el microservicio Python
     /// </summary>
     /// <param name="iterations">Número de iteraciones de predicción (query parameter)</param>
@@ -57,10 +38,10 @@ public class CoordinateController : ControllerBase
             // Use the provided initial coordinates (4 points) as the seed sequence
             var initialSequence = new List<CoordinateDTO>
             {
-                new CoordinateDTO { Latitude = 21.295448, Longitude = -89.639144 },
-                new CoordinateDTO { Latitude = 21.292690, Longitude = -89.642461 },
-                new CoordinateDTO { Latitude = 21.293261, Longitude = -89.642678 },
-                new CoordinateDTO { Latitude = 21.292013, Longitude = -89.643941 }
+                new CoordinateDTO { Latitude = 21.290981, Longitude = -89.651351},
+                new CoordinateDTO { Latitude = 21.290268, Longitude = -89.652908 },
+                new CoordinateDTO {Latitude = 21.290339, Longitude = -89.655000},
+                new CoordinateDTO { Latitude = 21.289911, Longitude = -89.657960 }
             };
 
             _logger.LogInformation($"Solicitud GET predict: seed {initialSequence.Count} coords, {iterations} iterations");

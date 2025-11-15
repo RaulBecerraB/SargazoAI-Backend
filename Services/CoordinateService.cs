@@ -98,13 +98,40 @@ public class CoordinateService : ICoordinateService
                     Longitude = response.Longitud_siguiente
                 };
 
+                // Obtener datos oceánicos para esta coordenada
+                var oceanData = await GetOceanDataAsync(predictedCoordinate.Latitude, predictedCoordinate.Longitude);
+
+                // Predecir biomasa usando los datos oceánicos
+                if (oceanData.AvgSeaSurfaceTemperature.HasValue &&
+                    oceanData.AvgOceanCurrentVelocity.HasValue &&
+                    oceanData.AvgOceanCurrentDirection.HasValue)
+                {
+                    var biomass = await PredictBiomassAsync(
+                        predictedCoordinate.Latitude,
+                        predictedCoordinate.Longitude,
+                        oceanData.AvgSeaSurfaceTemperature.Value,
+                        oceanData.AvgOceanCurrentVelocity.Value,
+                        oceanData.AvgOceanCurrentDirection.Value
+                    );
+                    predictedCoordinate.SargassumBiomass = biomass;
+                }
+
                 predictedCoordinates.Add(predictedCoordinate);
+
+                // Log con toda la información
+                _logger.LogInformation(
+                    $"Predicción {i + 1}: Lat={response.Latitud_siguiente:F6}, Long={response.Longitud_siguiente:F6}, " +
+                    $"Biomasa={predictedCoordinate.SargassumBiomass:F2}kg/m²");
 
                 // Actualizar la ventana deslizante: remover la primera, agregar la nueva predicción
                 slidingWindow.RemoveAt(0);
                 slidingWindow.Add(predictedCoordinate);
 
-                _logger.LogInformation($"Predicción {i + 1}: Lat={response.Latitud_siguiente:F6}, Long={response.Longitud_siguiente:F6}");
+                // Pequeña pausa para no sobrecargar la API de Open-Meteo
+                if (i < iterations - 1)
+                {
+                    await Task.Delay(500);
+                }
             }
 
             _logger.LogInformation($"Predicciones completadas. Total: {predictedCoordinates.Count}");
@@ -173,6 +200,120 @@ public class CoordinateService : ICoordinateService
                 _logger.LogError(ex, "Error definitivo al conectar con el microservicio Python después de {Attempt} intentos", attempt);
                 throw new HttpRequestException("Error al conectar con el microservicio Python", ex);
             }
+        }
+    }
+
+    /// <summary>
+    /// Obtiene datos oceánicos de Open-Meteo API para una coordenada específica
+    /// </summary>
+    private async Task<OceanDataDTO> GetOceanDataAsync(double latitude, double longitude)
+    {
+        try
+        {
+            var url = $"https://marine-api.open-meteo.com/v1/marine?" +
+                      $"latitude={latitude}&longitude={longitude}" +
+                      $"&hourly=sea_surface_temperature,ocean_current_velocity,ocean_current_direction" +
+                      $"&past_hours=24";
+
+            _logger.LogDebug($"Calling Open-Meteo API for ({latitude:F6}, {longitude:F6})");
+
+            var response = await _httpClient.GetAsync(url);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning($"Open-Meteo API returned status {response.StatusCode} for ({latitude}, {longitude})");
+                return new OceanDataDTO();
+            }
+
+            var responseContent = await response.Content.ReadAsStringAsync();
+            var oceanResponse = JsonSerializer.Deserialize<OceanDataResponseDTO>(responseContent,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+            if (oceanResponse?.Hourly == null)
+            {
+                _logger.LogWarning($"No hourly data returned from Open-Meteo for ({latitude}, {longitude})");
+                return new OceanDataDTO();
+            }
+
+            var hourly = oceanResponse.Hourly;
+
+            // Calcular promedios (filtrar valores nulos)
+            var temps = hourly.Sea_Surface_Temperature?.Where(t => t.HasValue).Select(t => t!.Value).ToList() ?? new List<double>();
+            var velocities = hourly.Ocean_Current_Velocity?.Where(v => v.HasValue).Select(v => v!.Value).ToList() ?? new List<double>();
+            var directions = hourly.Ocean_Current_Direction?.Where(d => d.HasValue).Select(d => d!.Value).ToList() ?? new List<double>();
+
+            var avgTemp = temps.Count > 0 ? Math.Round(temps.Average(), 2) : (double?)null;
+            var avgVelocity = velocities.Count > 0 ? Math.Round(velocities.Average(), 2) : (double?)null;
+            var avgDirection = directions.Count > 0 ? Math.Round(directions.Average(), 2) : (double?)null;
+            var lastTime = hourly.Time?.LastOrDefault();
+
+            return new OceanDataDTO
+            {
+                AvgSeaSurfaceTemperature = avgTemp,
+                AvgOceanCurrentVelocity = avgVelocity,
+                AvgOceanCurrentDirection = avgDirection,
+                LastUpdateTime = lastTime
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"Error obteniendo datos oceánicos para ({latitude}, {longitude})");
+            return new OceanDataDTO(); // Retornar objeto vacío en caso de error
+        }
+    }
+
+    /// <summary>
+    /// Predice la biomasa de sargazo usando el microservicio Python
+    /// </summary>
+    private async Task<double?> PredictBiomassAsync(
+        double latitude,
+        double longitude,
+        double temperature,
+        double velocity,
+        double direction)
+    {
+        try
+        {
+            var request = new BiomassRequestDTO
+            {
+                Lat = latitude,
+                Lon = longitude,
+                Avg_Sea_Surface_Temperature = temperature,
+                Avg_Ocean_Current_Velocity = velocity,
+                Avg_Ocean_Current_Direction = direction
+            };
+
+            var json = JsonSerializer.Serialize(request, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower });
+            var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+
+            _logger.LogDebug($"Calling Biomass prediction API for ({latitude:F6}, {longitude:F6})");
+
+            var response = await _httpClient.PostAsync(PythonApiConfig.Endpoints.PredictBiomass, content);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                _logger.LogWarning($"Biomass API returned status {response.StatusCode}. Response: {errorContent}");
+                return null;
+            }
+
+            var responseContent = await response.Content.ReadAsStringAsync();
+            var biomassResponse = JsonSerializer.Deserialize<BiomassResponseDTO>(responseContent,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+            if (biomassResponse == null)
+            {
+                _logger.LogWarning($"Failed to deserialize biomass response for ({latitude}, {longitude})");
+                return null;
+            }
+
+            _logger.LogDebug($"Biomasa predicha: {biomassResponse.Sargassum_Biomass:F2} kg/m²");
+            return Math.Round(biomassResponse.Sargassum_Biomass, 2);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"Error prediciendo biomasa para ({latitude}, {longitude})");
+            return null;
         }
     }
 }

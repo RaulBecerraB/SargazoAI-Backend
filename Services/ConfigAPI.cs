@@ -11,6 +11,8 @@ public static class PythonApiConfig
         public static string Health => $"{BaseUrl}/health";
 
         public static string Predict => $"{BaseUrl}/predict-coordinate";
+
+        public static string PredictBiomass => $"{BaseUrl}/predict-biomass";
     }
 
     public static string GetEndpoint(string endpoint) => endpoint;
