@@ -3,7 +3,7 @@ namespace SargazoAI_Backend.Services;
 public static class PythonApiConfig
 {
 
-    private const string BaseUrl = "sargazoai-predicter-production.up.railway.app";
+    private const string BaseUrl = "https://sargazoai-predicter-production.up.railway.app";
 
     public static class Endpoints
     {
