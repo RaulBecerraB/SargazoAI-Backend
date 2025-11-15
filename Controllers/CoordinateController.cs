@@ -43,24 +43,27 @@ public class CoordinateController : ControllerBase
     /// Predice coordenadas futuras usando el microservicio Python
     /// </summary>
     /// <param name="iterations">Número de iteraciones de predicción (query parameter)</param>
-    [HttpPost("predict")]
+    [HttpGet("predict")]
     public async Task<ActionResult<PredictionResultDTO>> PredictCoordinates(
-        [FromBody] List<CoordinateDTO> initialSequence,
         [FromQuery] int iterations = 1)
     {
         try
         {
-            if (initialSequence == null || initialSequence.Count == 0)
-            {
-                return BadRequest("Se requiere una secuencia de coordenadas");
-            }
-
             if (iterations <= 0)
             {
                 return BadRequest("El número de iteraciones debe ser mayor a 0");
             }
 
-            _logger.LogInformation($"Solicitud de predicción: {initialSequence.Count} coordenadas, {iterations} iteraciones");
+            // Use the provided initial coordinates (4 points) as the seed sequence
+            var initialSequence = new List<CoordinateDTO>
+            {
+                new CoordinateDTO { Latitude = 21.67980122, Longitude = -88.88184816 },
+                new CoordinateDTO { Latitude = 21.69828668, Longitude = -88.88029366 },
+                new CoordinateDTO { Latitude = 21.69337024, Longitude = -88.89331896 },
+                new CoordinateDTO { Latitude = 21.69287164, Longitude = -88.88996288 }
+            };
+
+            _logger.LogInformation($"Solicitud GET predict: seed {initialSequence.Count} coords, {iterations} iterations");
 
             var result = await _coordinateService.PredictCoordinatesAsync(initialSequence, iterations);
 

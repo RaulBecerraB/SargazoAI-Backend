@@ -74,9 +74,18 @@ public class CoordinateService : ICoordinateService
                 _logger.LogInformation($"Iteración {i + 1}/{iterations}");
 
                 // Crear la solicitud para el microservicio Python
+                // The Python service expects a sequence with 5 rows (time steps).
+                // Ensure we send exactly 5 by padding with the last known coordinate if needed.
+                var seq = slidingWindow.Select(c => new List<double> { c.Latitude, c.Longitude }).ToList();
+                while (seq.Count < 5)
+                {
+                    // duplicate the last coordinate to reach required length
+                    seq.Add(new List<double>(seq.Last()));
+                }
+
                 var predictionRequest = new PredictionRequestDTO
                 {
-                    Sequence = slidingWindow.Select(c => new List<double> { c.Latitude, c.Longitude }).ToList()
+                    Sequence = seq
                 };
 
                 // Llamar al microservicio Python
@@ -115,29 +124,55 @@ public class CoordinateService : ICoordinateService
 
     private async Task<PredictionResponseDTO> CallPythonMicroserviceAsync(PredictionRequestDTO request)
     {
-        try
+        const int maxAttempts = 3;
+        int attempt = 0;
+
+        // Serialize using camelCase to match the Python service OpenAPI contract (expects "sequence")
+        var json = JsonSerializer.Serialize(request, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+        var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+
+        while (true)
         {
-            var json = JsonSerializer.Serialize(request);
-            var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
-
-            var response = await _httpClient.PostAsync(PythonApiConfig.Endpoints.Predict, content);
-
-            if (!response.IsSuccessStatusCode)
+            attempt++;
+            try
             {
-                _logger.LogError($"Error en microservicio Python: {response.StatusCode}");
-                throw new HttpRequestException($"Error en microservicio Python: {response.StatusCode}");
+                _logger.LogDebug("Calling Python microservice (attempt {Attempt})", attempt);
+                var response = await _httpClient.PostAsync(PythonApiConfig.Endpoints.Predict, content);
+
+                var responseContent = await response.Content.ReadAsStringAsync();
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("Python microservice returned non-success status {Status}. Response: {Response}", response.StatusCode, responseContent);
+                    throw new HttpRequestException($"Python microservice returned status {response.StatusCode}");
+                }
+
+                var predictionResponse = JsonSerializer.Deserialize<PredictionResponseDTO>(responseContent,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+                if (predictionResponse == null)
+                {
+                    _logger.LogError("Failed to deserialize prediction response. Raw content: {Content}", responseContent);
+                    throw new InvalidOperationException("No se pudo deserializar la respuesta del microservicio");
+                }
+
+                return predictionResponse;
             }
-
-            var responseContent = await response.Content.ReadAsStringAsync();
-            var predictionResponse = JsonSerializer.Deserialize<PredictionResponseDTO>(responseContent,
-                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-
-            return predictionResponse ?? throw new InvalidOperationException("No se pudo deserializar la respuesta del microservicio");
-        }
-        catch (HttpRequestException ex)
-        {
-            _logger.LogError(ex, "Error al conectar con el microservicio Python");
-            throw;
+            catch (HttpRequestException ex) when (attempt < maxAttempts)
+            {
+                _logger.LogWarning(ex, "Attempt {Attempt} failed connecting to Python microservice. Retrying...", attempt);
+                // Exponential backoff
+                var delayMs = 500 * (int)Math.Pow(2, attempt - 1);
+                await Task.Delay(delayMs);
+                // recreate content because StringContent can be disposed/consumed
+                content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+                continue;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error definitivo al conectar con el microservicio Python después de {Attempt} intentos", attempt);
+                throw new HttpRequestException("Error al conectar con el microservicio Python", ex);
+            }
         }
     }
 }

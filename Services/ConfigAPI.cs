@@ -10,7 +10,7 @@ public static class PythonApiConfig
 
         public static string Health => $"{BaseUrl}/health";
 
-        public static string Predict => $"{BaseUrl}/predict";
+        public static string Predict => $"{BaseUrl}/predict-coordinate";
     }
 
     public static string GetEndpoint(string endpoint) => endpoint;
