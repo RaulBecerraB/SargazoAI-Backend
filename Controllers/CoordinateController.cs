@@ -57,10 +57,10 @@ public class CoordinateController : ControllerBase
             // Use the provided initial coordinates (4 points) as the seed sequence
             var initialSequence = new List<CoordinateDTO>
             {
-                new CoordinateDTO { Latitude = 21.67980122, Longitude = -88.88184816 },
-                new CoordinateDTO { Latitude = 21.69828668, Longitude = -88.88029366 },
-                new CoordinateDTO { Latitude = 21.69337024, Longitude = -88.89331896 },
-                new CoordinateDTO { Latitude = 21.69287164, Longitude = -88.88996288 }
+                new CoordinateDTO { Latitude = 21.295448, Longitude = -89.639144 },
+                new CoordinateDTO { Latitude = 21.292690, Longitude = -89.642461 },
+                new CoordinateDTO { Latitude = 21.293261, Longitude = -89.642678 },
+                new CoordinateDTO { Latitude = 21.292013, Longitude = -89.643941 }
             };
 
             _logger.LogInformation($"Solicitud GET predict: seed {initialSequence.Count} coords, {iterations} iterations");
